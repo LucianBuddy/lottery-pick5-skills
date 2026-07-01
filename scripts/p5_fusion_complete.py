@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-排列5 (Pick5) 多策略融合预测系统 V1.12.0
+排列5 (Pick5) 多策略融合预测系统 V1.19.0
 
 10层评分(L1~L10) + 时间衰减 + GA枚举 + 元学习权重
-+ 置换检验MI + 卡方滑动窗 + CUSUM断点检测
++ 置换检验MI + 卡方滑动窗 + CUSUM断点检测 + 冷热平衡
 
-与排列3的关联: 排列5前3位=排列3开奖号码, 统计利用此相关性。
+V1.19.0:
+  [B] 和值约束非对称展宽: 改用50期滑动窗+3σ, 包容冷态和值
+  [C] 热度衰减: pos_freq softmax温度缩放(T=2.0), L1用缩放版
+  [D] 位置互补: 冷位数字(freq<8%)时L1乘1.2-1.5x补偿
 """
 
 import sys, os, json, math, random, warnings, time
@@ -85,6 +88,15 @@ class Pick5FusionComplete:
                 weighted[d[pos]] += w
                 total_w += w
             self.pos_freq[pos] = {d: weighted.get(d, 0) / max(total_w, 1e-8) for d in range(10)}
+
+        # 【P5-热度衰减】softmax温度缩放(T=2.0), 降低热号优势
+        temp = 2.0
+        self.pos_freq_temp = {}
+        for pos in range(5):
+            vals = [self.pos_freq[pos][d] for d in range(10)]
+            exp_vals = [math.exp(v / temp) for v in vals]
+            sum_exp = sum(exp_vals)
+            self.pos_freq_temp[pos] = {d: exp_vals[d] / sum_exp for d in range(10)}
 
     def _build_p3_correlation(self) -> Dict:
         """计算排列3(前3位)与后2位的相关性 — 指数衰减"""
@@ -422,28 +434,40 @@ class Pick5FusionComplete:
     def _compute_layers(self, digits: List[int]) -> Tuple[float, float, float, float, float, float, float, float, float, float]:
         """10层评分: L1~L9 + L10位置交互"""
         # ----------------------------------------------------------------
-        # L1: 5位位置频率的乘积
+        # L1: 5位位置频率的乘积 (softmax温度缩放版, T=2.0)
+        # V1.19.0-C: 热度衰减, 降低热号优势
+        # V1.19.0-D: 冷位补偿, freq<8%时L1乘补偿系数
         # ----------------------------------------------------------------
         l1 = 1.0
+        freq_source = getattr(self, 'pos_freq_temp', self.pos_freq)
         for pos in range(5):
-            l1 *= self.pos_freq[pos].get(digits[pos], 0.02)
+            l1 *= freq_source[pos].get(digits[pos], 0.02)
         l1 = min(l1 * 10000, 1.0)
+        # 【P5-冷位补偿】冷位数字(freq<8%)时L1乘补偿系数
+        cold_count = sum(1 for pos in range(5)
+                         if self.pos_freq[pos].get(digits[pos], 0) < 0.08)
+        if cold_count >= 1:
+            l1 *= min(1.0 + cold_count * 0.2, 1.5)
 
         # ----------------------------------------------------------------
-        # L2: 和值 + 跨度 — 基于历史分布的偏差评分
+        # L2: 和值 + 跨度 — 滑动窗口(50期) + 3σ非对称展宽
+        # V1.19.0-B: 改用近50期滑动均值, 容忍度放宽到3σ
         # ----------------------------------------------------------------
         s = sum(digits)
         sp = max(digits) - min(digits)
-        if not hasattr(self, '_sum_stats') or self._sum_stats is None:
-            _sums = [sum(d) for d in self.draws]
-            self._sum_stats = (float(np.mean(_sums)), float(np.std(_sums)))
-        _mean, _std = self._sum_stats
-        # 偏差纠正: 如果存在_apply_debias的结果，偏移和值均值
-        _debias_mean = _mean
+        # 滑动窗口和值统计 (近50期)
+        window = min(50, len(self.draws))
+        _sliding = self.draws[-window:] if len(self.draws) >= window else self.draws
+        _sums = [sum(d) for d in _sliding]
+        _mean_slide = float(np.mean(_sums))
+        _std_slide = float(np.std(_sums)) + 1e-4
+        # 偏差纠正
+        _debias = _mean_slide
         if hasattr(self, '_debias') and self._debias:
             total_shift = self._debias.get('sum_shift', 0) + self._debias.get('cusum_shift', 0)
-            _debias_mean = _mean + total_shift
-        sum_ok = np.exp(-0.5 * ((s - _debias_mean) / max(2 * _std, 1)) ** 2) if _std > 0 else 0.5
+            _debias = _mean_slide + total_shift
+        # 3σ宽容度
+        sum_ok = np.exp(-0.5 * ((s - _debias) / max(3 * _std_slide, 1)) ** 2)
         span_ok = 1.0 if 4 <= sp <= 8 else 0.6
         l2 = sum_ok * 0.6 + span_ok * 0.4
 
@@ -657,16 +681,19 @@ class Pick5FusionComplete:
                 print(f"  [P5-CUSUM] {pos_names[pos]}: ↓ 负向偏移(均值趋势超阈值)")
 
     def _update_constraint_ranges(self):
-        """从历史开奖统计自动计算约束区间"""
-        if len(self.draws) < 100:
+        """从历史开奖统计自动计算约束区间
+        V1.19.0-B: 近50期滑动窗口 + 3σ非对称展宽, 包容冷态和值
+        """
+        if len(self.draws) < 50:
             return
-        sums = [sum(d) for d in self.draws[-500:]]
-        odds = [sum(1 for x in d if x % 2 == 1) for d in self.draws[-500:]]
-        spans = [max(d) - min(d) for d in self.draws[-500:]]
+        window = min(50, len(self.draws))
+        sums = [sum(d) for d in self.draws[-window:]]
+        odds = [sum(1 for x in d if x % 2 == 1) for d in self.draws[-window:]]
+        spans = [max(d) - min(d) for d in self.draws[-window:]]
 
         self._constraint_ranges = {
-            'sum': (float(np.mean(sums) - 1.5*np.std(sums)),
-                    float(np.mean(sums) + 1.5*np.std(sums))),
+            'sum': (float(np.mean(sums) - 3.0*np.std(sums)),
+                    float(np.mean(sums) + 3.0*np.std(sums))),
             'odd': (1, 4),
             'span': (max(2, float(np.mean(spans) - np.std(spans))),
                      float(np.mean(spans) + np.std(spans))),
@@ -1150,6 +1177,13 @@ class Pick5FusionComplete:
 
         # ═══ 复式方案(V1.18.0): 前3位+后2位分拆复式, 后2位保底≥3候选 ═══
         compound = self._generate_compound(result)
+
+        # 自动存储预测结果
+        try:
+            from prediction_store import store_prediction
+            store_prediction(self.last_period, top10)
+        except Exception:
+            pass
 
         return {
             'period': self.last_period,

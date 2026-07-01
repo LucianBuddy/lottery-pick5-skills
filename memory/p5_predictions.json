@@ -114,6 +114,121 @@
           "hit_probability": 28.2
         }
       ]
+    },
+    {
+      "period": "26171",
+      "bets": [
+        {
+          "digits": [
+            0,
+            4,
+            5,
+            7,
+            3
+          ],
+          "final_score": 1.695191682092658,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            0,
+            4,
+            0,
+            3,
+            3
+          ],
+          "final_score": 1.611397368958016,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            0,
+            4,
+            4,
+            3,
+            1
+          ],
+          "final_score": 1.5234253635771047,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            9,
+            1,
+            4,
+            2,
+            6
+          ],
+          "final_score": 1.055272585995908,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            0,
+            4,
+            3,
+            7,
+            0
+          ],
+          "final_score": 1.490795556387679,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            4,
+            4,
+            5,
+            3,
+            0
+          ],
+          "final_score": 1.4957753872566977,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            9,
+            9,
+            5,
+            2,
+            4
+          ],
+          "final_score": 1.1030399589798454,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            9,
+            1,
+            4,
+            4,
+            0
+          ],
+          "final_score": 1.3671394421213694,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            9,
+            1,
+            5,
+            6,
+            2
+          ],
+          "final_score": 1.0872875482826647,
+          "hit_probability": 30.9
+        },
+        {
+          "digits": [
+            2,
+            4,
+            4,
+            9,
+            9
+          ],
+          "final_score": 0.909750727022715,
+          "hit_probability": 30.9
+        }
+      ]
     }
   ]
 }
