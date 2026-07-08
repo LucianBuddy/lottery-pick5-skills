@@ -32,6 +32,6 @@ def store_prediction(period, bets):
         data = {"predictions": []}
     data["predictions"] = [p for p in data.get("predictions", []) if p.get("period") != period]
     data["predictions"].append({"period": period, "bets": bets[:10]})
-    data["predictions"] = data["predictions"][-2:]  # keep last 2
+    data["predictions"] = data["predictions"][-50:]  # 保留最近50期供复盘
     with open(STORE_PATH, 'w') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

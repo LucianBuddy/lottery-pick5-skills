@@ -229,6 +229,931 @@
           "hit_probability": 30.9
         }
       ]
+    },
+    {
+      "period": "26173",
+      "bets": [
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            1,
+            0
+          ],
+          "final_score": -13.060319139913874,
+          "raw_probability": 0.1208,
+          "hit_probability": 12.1
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            1,
+            1
+          ],
+          "final_score": -13.147021576499082,
+          "raw_probability": 0.1108,
+          "hit_probability": 11.1
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            4,
+            6
+          ],
+          "final_score": -13.280067534188259,
+          "raw_probability": 0.097,
+          "hit_probability": 9.7
+        },
+        {
+          "digits": [
+            9,
+            4,
+            3,
+            1,
+            1
+          ],
+          "final_score": -13.189433424903392,
+          "raw_probability": 0.1062,
+          "hit_probability": 10.6
+        },
+        {
+          "digits": [
+            9,
+            4,
+            5,
+            2,
+            6
+          ],
+          "final_score": -13.417418959853803,
+          "raw_probability": 0.0845,
+          "hit_probability": 8.5
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            9,
+            8
+          ],
+          "final_score": -13.474681965386505,
+          "raw_probability": 0.0798,
+          "hit_probability": 8.0
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            7,
+            0
+          ],
+          "final_score": -13.019633109414134,
+          "raw_probability": 0.1258,
+          "hit_probability": 12.6
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            9,
+            4
+          ],
+          "final_score": -13.474681965386505,
+          "raw_probability": 0.0798,
+          "hit_probability": 8.0
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            7,
+            1
+          ],
+          "final_score": -13.106335545999341,
+          "raw_probability": 0.1154,
+          "hit_probability": 11.5
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            6,
+            8
+          ],
+          "final_score": -13.474681965386505,
+          "raw_probability": 0.0798,
+          "hit_probability": 8.0
+        }
+      ]
+    },
+    {
+      "period": "26174",
+      "bets": [
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            1,
+            1
+          ],
+          "final_score": -13.147021576499082,
+          "raw_probability": 0.1236,
+          "hit_probability": 12.4
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            4,
+            6
+          ],
+          "final_score": -13.280067534188259,
+          "raw_probability": 0.1082,
+          "hit_probability": 10.8
+        },
+        {
+          "digits": [
+            9,
+            4,
+            3,
+            1,
+            1
+          ],
+          "final_score": -13.189433424903392,
+          "raw_probability": 0.1185,
+          "hit_probability": 11.9
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            9,
+            8
+          ],
+          "final_score": -13.474681965386505,
+          "raw_probability": 0.0891,
+          "hit_probability": 8.9
+        },
+        {
+          "digits": [
+            9,
+            4,
+            0,
+            1,
+            1
+          ],
+          "final_score": -13.189433424903392,
+          "raw_probability": 0.1185,
+          "hit_probability": 11.9
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            9,
+            4
+          ],
+          "final_score": -13.474681965386505,
+          "raw_probability": 0.0891,
+          "hit_probability": 8.9
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            7,
+            0
+          ],
+          "final_score": -13.053455389213408,
+          "raw_probability": 0.1358,
+          "hit_probability": 13.6
+        },
+        {
+          "digits": [
+            9,
+            4,
+            0,
+            0,
+            5
+          ],
+          "final_score": -13.675830502879686,
+          "raw_probability": 0.0729,
+          "hit_probability": 7.3
+        },
+        {
+          "digits": [
+            9,
+            1,
+            4,
+            5,
+            7
+          ],
+          "final_score": -13.954825333239635,
+          "raw_probability": 0.0551,
+          "hit_probability": 5.5
+        },
+        {
+          "digits": [
+            9,
+            4,
+            4,
+            6,
+            8
+          ],
+          "final_score": -13.474681965386505,
+          "raw_probability": 0.0891,
+          "hit_probability": 8.9
+        }
+      ]
+    },
+    {
+      "period": "26175",
+      "bets": [
+        {
+          "digits": [
+            9,
+            5,
+            4,
+            7,
+            3
+          ],
+          "final_score": -13.04486582060837,
+          "raw_probability": 0.102,
+          "hit_probability": 10.2,
+          "display_score": 96.7
+        },
+        {
+          "digits": [
+            9,
+            9,
+            4,
+            7,
+            3
+          ],
+          "final_score": -13.04486582060837,
+          "raw_probability": 0.102,
+          "hit_probability": 10.2,
+          "display_score": 96.7
+        },
+        {
+          "digits": [
+            0,
+            4,
+            3,
+            3,
+            3
+          ],
+          "final_score": -13.012313445882233,
+          "display_score": 99.9,
+          "raw_probability": 0.1054,
+          "hit_probability": 10.5
+        },
+        {
+          "digits": [
+            0,
+            4,
+            3,
+            7,
+            0
+          ],
+          "final_score": -13.145142836722496,
+          "display_score": 87.5,
+          "raw_probability": 0.0923,
+          "hit_probability": 9.2
+        },
+        {
+          "digits": [
+            9,
+            5,
+            3,
+            7,
+            3
+          ],
+          "final_score": -13.087277669012682,
+          "raw_probability": 0.0978,
+          "hit_probability": 9.8,
+          "display_score": 92.7
+        },
+        {
+          "digits": [
+            9,
+            1,
+            4,
+            7,
+            3
+          ],
+          "final_score": -13.04486582060837,
+          "raw_probability": 0.102,
+          "hit_probability": 10.2,
+          "display_score": 96.7
+        },
+        {
+          "digits": [
+            9,
+            9,
+            3,
+            7,
+            3
+          ],
+          "final_score": -13.087277669012682,
+          "raw_probability": 0.0978,
+          "hit_probability": 9.8,
+          "display_score": 92.7
+        },
+        {
+          "digits": [
+            9,
+            9,
+            0,
+            7,
+            3
+          ],
+          "final_score": -13.087277669012682,
+          "raw_probability": 0.0978,
+          "hit_probability": 9.8,
+          "display_score": 92.7
+        },
+        {
+          "digits": [
+            0,
+            4,
+            4,
+            7,
+            3
+          ],
+          "final_score": -13.011043540809096,
+          "raw_probability": 0.1056,
+          "hit_probability": 10.6,
+          "display_score": 100.0
+        },
+        {
+          "digits": [
+            9,
+            9,
+            4,
+            1,
+            3
+          ],
+          "final_score": -13.094141419713148,
+          "raw_probability": 0.0971,
+          "hit_probability": 9.7,
+          "display_score": 92.0
+        }
+      ]
+    },
+    {
+      "period": "26176",
+      "bets": [
+        {
+          "digits": [
+            6,
+            0,
+            0,
+            4,
+            2
+          ],
+          "final_score": -12.549101406372381,
+          "raw_probability": 0.0355,
+          "hit_probability": 3.5,
+          "display_score": 16.2
+        },
+        {
+          "digits": [
+            0,
+            7,
+            6,
+            9,
+            8
+          ],
+          "final_score": -10.727927622683904,
+          "raw_probability": 0.2191,
+          "hit_probability": 21.9,
+          "display_score": 100.0
+        },
+        {
+          "digits": [
+            2,
+            7,
+            6,
+            2,
+            6
+          ],
+          "final_score": -12.18190924764292,
+          "raw_probability": 0.0512,
+          "hit_probability": 5.1,
+          "display_score": 23.4
+        },
+        {
+          "digits": [
+            6,
+            4,
+            4,
+            9,
+            8
+          ],
+          "final_score": -11.410507321772034,
+          "display_score": 50.5,
+          "raw_probability": 0.1107,
+          "hit_probability": 11.1
+        },
+        {
+          "digits": [
+            0,
+            0,
+            4,
+            9,
+            8
+          ],
+          "final_score": -11.568410710781595,
+          "display_score": 43.2,
+          "raw_probability": 0.0946,
+          "hit_probability": 9.5
+        },
+        {
+          "digits": [
+            2,
+            7,
+            6,
+            5,
+            0
+          ],
+          "final_score": -11.499418575865269,
+          "raw_probability": 0.1013,
+          "hit_probability": 10.1,
+          "display_score": 46.2
+        },
+        {
+          "digits": [
+            9,
+            1,
+            1,
+            0,
+            3
+          ],
+          "final_score": -11.547734410627909,
+          "display_score": 44.1,
+          "raw_probability": 0.0965,
+          "hit_probability": 9.7
+        },
+        {
+          "digits": [
+            6,
+            0,
+            0,
+            8,
+            3
+          ],
+          "final_score": -11.159513814612128,
+          "display_score": 64.9,
+          "raw_probability": 0.1423,
+          "hit_probability": 14.2
+        },
+        {
+          "digits": [
+            0,
+            1,
+            0,
+            5,
+            4
+          ],
+          "final_score": -11.64732360053228,
+          "display_score": 39.9,
+          "raw_probability": 0.0874,
+          "hit_probability": 8.7
+        },
+        {
+          "digits": [
+            1,
+            2,
+            2,
+            8,
+            3
+          ],
+          "final_score": -12.001563356282466,
+          "display_score": 28.0,
+          "raw_probability": 0.0613,
+          "hit_probability": 6.1
+        }
+      ]
+    },
+    {
+      "period": "26177",
+      "bets": [
+        {
+          "digits": [
+            9,
+            7,
+            6,
+            5,
+            8
+          ],
+          "final_score": -10.72124342914018,
+          "raw_probability": 0.2043,
+          "hit_probability": 20.4,
+          "display_score": 100.0
+        },
+        {
+          "digits": [
+            9,
+            7,
+            6,
+            9,
+            3
+          ],
+          "final_score": -11.099561989891932,
+          "raw_probability": 0.14,
+          "hit_probability": 14.0,
+          "display_score": 68.5
+        },
+        {
+          "digits": [
+            6,
+            4,
+            4,
+            0,
+            8
+          ],
+          "final_score": -11.423650236926852,
+          "display_score": 49.5,
+          "raw_probability": 0.1012,
+          "hit_probability": 10.1
+        },
+        {
+          "digits": [
+            6,
+            4,
+            0,
+            9,
+            8
+          ],
+          "final_score": -11.452919170176346,
+          "display_score": 48.1,
+          "raw_probability": 0.0983,
+          "hit_probability": 9.8
+        },
+        {
+          "digits": [
+            0,
+            0,
+            0,
+            5,
+            7
+          ],
+          "final_score": -12.007868048134984,
+          "display_score": 27.6,
+          "raw_probability": 0.0564,
+          "hit_probability": 5.6
+        },
+        {
+          "digits": [
+            6,
+            7,
+            6,
+            4,
+            0
+          ],
+          "final_score": -11.575572360585511,
+          "raw_probability": 0.0869,
+          "hit_probability": 8.7,
+          "display_score": 42.6
+        },
+        {
+          "digits": [
+            9,
+            0,
+            1,
+            5,
+            3
+          ],
+          "final_score": -11.410283108515424,
+          "display_score": 50.2,
+          "raw_probability": 0.1026,
+          "hit_probability": 10.3
+        },
+        {
+          "digits": [
+            0,
+            9,
+            0,
+            1,
+            1
+          ],
+          "final_score": -12.126158083818964,
+          "display_score": 24.5,
+          "raw_probability": 0.0501,
+          "hit_probability": 5.0
+        },
+        {
+          "digits": [
+            2,
+            0,
+            1,
+            9,
+            0
+          ],
+          "final_score": -11.250052724628036,
+          "display_score": 58.9,
+          "raw_probability": 0.1204,
+          "hit_probability": 12.0
+        },
+        {
+          "digits": [
+            1,
+            1,
+            2,
+            3,
+            0
+          ],
+          "final_score": -12.358790111455047,
+          "display_score": 19.4,
+          "raw_probability": 0.0397,
+          "hit_probability": 4.0
+        }
+      ]
+    },
+    {
+      "period": "26178",
+      "bets": [
+        {
+          "digits": [
+            6,
+            0,
+            3,
+            0,
+            0
+          ],
+          "final_score": -11.633107125139276,
+          "raw_probability": 0.0698,
+          "hit_probability": 7.0,
+          "display_score": 19.0
+        },
+        {
+          "digits": [
+            6,
+            0,
+            1,
+            7,
+            8
+          ],
+          "final_score": -9.973261937408887,
+          "raw_probability": 0.3672,
+          "hit_probability": 36.7,
+          "display_score": 100.0
+        },
+        {
+          "digits": [
+            9,
+            7,
+            4,
+            4,
+            4
+          ],
+          "final_score": -12.752285212336625,
+          "raw_probability": 0.0228,
+          "hit_probability": 2.3,
+          "display_score": 6.2
+        },
+        {
+          "digits": [
+            2,
+            7,
+            2,
+            2,
+            5
+          ],
+          "final_score": -13.181756568338463,
+          "raw_probability": 0.0148,
+          "hit_probability": 1.5,
+          "display_score": 4.0
+        },
+        {
+          "digits": [
+            0,
+            4,
+            4,
+            7,
+            8
+          ],
+          "final_score": -10.668379702029473,
+          "display_score": 49.9,
+          "raw_probability": 0.1832,
+          "hit_probability": 18.3
+        },
+        {
+          "digits": [
+            9,
+            4,
+            3,
+            7,
+            7
+          ],
+          "final_score": -10.872656853120924,
+          "display_score": 40.7,
+          "raw_probability": 0.1494,
+          "hit_probability": 14.9
+        },
+        {
+          "digits": [
+            6,
+            0,
+            4,
+            9,
+            7
+          ],
+          "final_score": -11.30059880788819,
+          "raw_probability": 0.0974,
+          "hit_probability": 9.7,
+          "display_score": 26.5
+        },
+        {
+          "digits": [
+            0,
+            1,
+            0,
+            4,
+            2
+          ],
+          "final_score": -12.766003527468328,
+          "display_score": 6.1,
+          "raw_probability": 0.0225,
+          "hit_probability": 2.2
+        },
+        {
+          "digits": [
+            0,
+            1,
+            0,
+            6,
+            6
+          ],
+          "final_score": -12.7781929169702,
+          "display_score": 6.1,
+          "raw_probability": 0.0222,
+          "hit_probability": 2.2
+        },
+        {
+          "digits": [
+            1,
+            2,
+            5,
+            0,
+            7
+          ],
+          "final_score": -11.955736049235593,
+          "display_score": 13.8,
+          "raw_probability": 0.0506,
+          "hit_probability": 5.1
+        }
+      ]
+    },
+    {
+      "period": "26179",
+      "bets": [
+        {
+          "digits": [
+            0,
+            0,
+            4,
+            7,
+            8
+          ],
+          "final_score": -10.438155353489119,
+          "raw_probability": 0.1093,
+          "hit_probability": 10.9,
+          "display_score": 62.1
+        },
+        {
+          "digits": [
+            8,
+            7,
+            3,
+            0,
+            8
+          ],
+          "final_score": -10.046610406468952,
+          "raw_probability": 0.1617,
+          "hit_probability": 16.2,
+          "display_score": 91.9
+        },
+        {
+          "digits": [
+            8,
+            7,
+            6,
+            5,
+            0
+          ],
+          "final_score": -10.812494674876314,
+          "raw_probability": 0.0752,
+          "hit_probability": 7.5,
+          "display_score": 42.7
+        },
+        {
+          "digits": [
+            6,
+            0,
+            4,
+            7,
+            8
+          ],
+          "final_score": -9.961765358312647,
+          "raw_probability": 0.176,
+          "hit_probability": 17.6,
+          "display_score": 100.0
+        },
+        {
+          "digits": [
+            6,
+            4,
+            3,
+            7,
+            7
+          ],
+          "final_score": -10.621473180886518,
+          "display_score": 51.7,
+          "raw_probability": 0.091,
+          "hit_probability": 9.1
+        },
+        {
+          "digits": [
+            6,
+            7,
+            4,
+            0,
+            0
+          ],
+          "final_score": -10.259812277394559,
+          "display_score": 74.2,
+          "raw_probability": 0.1306,
+          "hit_probability": 13.1
+        },
+        {
+          "digits": [
+            8,
+            1,
+            0,
+            2,
+            3
+          ],
+          "final_score": -10.574150385269775,
+          "display_score": 54.2,
+          "raw_probability": 0.0954,
+          "hit_probability": 9.5
+        },
+        {
+          "digits": [
+            0,
+            0,
+            6,
+            5,
+            1
+          ],
+          "final_score": -11.06826641826821,
+          "display_score": 33.1,
+          "raw_probability": 0.0582,
+          "hit_probability": 5.8
+        },
+        {
+          "digits": [
+            0,
+            1,
+            3,
+            2,
+            3
+          ],
+          "final_score": -10.714685801775472,
+          "display_score": 47.1,
+          "raw_probability": 0.0829,
+          "hit_probability": 8.3
+        },
+        {
+          "digits": [
+            2,
+            2,
+            1,
+            1,
+            0
+          ],
+          "final_score": -12.153649120152831,
+          "display_score": 11.2,
+          "raw_probability": 0.0197,
+          "hit_probability": 2.0
+        }
+      ]
     }
   ]
 }

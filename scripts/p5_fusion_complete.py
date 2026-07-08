@@ -1,11 +1,27 @@
 #!/usr/bin/env python3
 """
-排列5 (Pick5) 多策略融合预测系统 V1.19.0
+排列5 (Pick5) 多策略融合预测系统 V1.23.0
 
 10层评分(L1~L10) + 时间衰减 + GA枚举 + 元学习权重
 + 置换检验MI + 卡方滑动窗 + CUSUM断点检测 + 冷热平衡
++ 万/千位硬约束 + 后区对子检测 + 跨期漂移检测 + 评分校准
 
-V1.19.0:
+V1.23.0 (2026-07-06, 26176期失准优化):
+  [A] Chi2降权加深: 下限0.7→0.5, 上限1.2→1.3, 增强冷号惩罚
+  [B] P1/P2位置强化: 万位/千位低频数字(freq<10%)额外+0.25log分
+  [C] CUSUM均值窗口缩短: 全量→近300期, 提升近期偏移敏感度
+  [D] 数字支配惩罚: 同数字≥3次时额外减分(-0.15/次), 防止单数垄断
+  [E] 近期数字先验: 最近5期出现数字≥3个时+0.08log分/个
+
+V1.21.0:
+  [A] 万/千位多样性硬约束: 每数字每位置限2次/Top10的前3位覆盖展宽增强
+  [B] 后区对子检测: 独立评分器对[十,个]对子结构额外加分
+  [C] 跨期预测漂移检测: Jaccard相似度>0.5时强制注入3组新号码
+  [D] 评分区间校准: 对数概率score统一映射回[0,100]显示区间
+
+V1.20.0:
+  [A] 概率校准+对数融合: 每层分数经log(p)变换后求和, 区分度提升10×
+  [C2] 后2位与前3位重叠检测: L6新增tail_overlap项
   [B] 和值约束非对称展宽: 改用50期滑动窗+3σ, 包容冷态和值
   [C] 热度衰减: pos_freq softmax温度缩放(T=2.0), L1用缩放版
   [D] 位置互补: 冷位数字(freq<8%)时L1乘1.2-1.5x补偿
@@ -20,7 +36,10 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import Counter, defaultdict
 
 from p5_data_updater import check_and_update
-from version import VERSION, RELEASE_DATE
+from version import VERSION as _VERSION, RELEASE_DATE as _RELEASE_DATE
+
+VERSION = _VERSION
+RELEASE_DATE = _RELEASE_DATE
 
 
 def data_dir() -> str:
@@ -44,6 +63,11 @@ def load_data(data_path: str) -> List[Tuple[int, int, int, int, int]]:
 
 
 class Pick5FusionComplete:
+    """排列5多策略融合完全体 V1.23.0
+    + 万/千位硬约束(方案A) + 后区对子检测(方案B)
+    + 跨期漂移检测(方案C) + 显示分校准(方案D)
+    + Chi2降权加深(A) + P1/P2位置强化(B)
+    + CUSUM窗口缩短(C) + 数字支配惩罚(D) + 近期先验(E)"""
 
     def __init__(self, data_path: Optional[str] = None, auto_update: bool = True):
         if data_path is None:
@@ -437,17 +461,62 @@ class Pick5FusionComplete:
         # L1: 5位位置频率的乘积 (softmax温度缩放版, T=2.0)
         # V1.19.0-C: 热度衰减, 降低热号优势
         # V1.19.0-D: 冷位补偿, freq<8%时L1乘补偿系数
+        # 【V1.24.0-A】位置-数字频率下限保护: 每位频率不低于0.025
+        # 防止强热号乘积效应导致冷稀有数字被完全压制
+        # 26177期万位8(近15期3次=温号)被完全忽略, 因模型过度惩罚低频乘积
         # ----------------------------------------------------------------
         l1 = 1.0
         freq_source = getattr(self, 'pos_freq_temp', self.pos_freq)
+        _MIN_POS_FREQ = 0.025  # 均匀分布0.1的25%
         for pos in range(5):
-            l1 *= freq_source[pos].get(digits[pos], 0.02)
+            _f = freq_source[pos].get(digits[pos], 0.02)
+            _f = max(_f, _MIN_POS_FREQ)  # 下限钳制
+            l1 *= _f
         l1 = min(l1 * 10000, 1.0)
-        # 【P5-冷位补偿】冷位数字(freq<8%)时L1乘补偿系数
+        # 【P5-冷位补偿】V2.0.0: 冷位数字(freq<8%)时在log空间上加成
+        # 旧版: l1 * 1.5 (线性) → log压缩后几乎无效
+        # 新版: log后 + 冷位bonus, 直接影响终分
         cold_count = sum(1 for pos in range(5)
                          if self.pos_freq[pos].get(digits[pos], 0) < 0.08)
+        cold_bonus = 0.0
         if cold_count >= 1:
-            l1 *= min(1.0 + cold_count * 0.2, 1.5)
+            cold_bonus = cold_count * 0.15  # 每个冷位+0.15 log分
+            # 多冷位叠加: 3冷位以上额外加成(冷号联动)
+            if cold_count >= 3:
+                cold_bonus += 0.10
+        # [V1.23.0-B] P1/P2位置强化: 万位/千位低频数字额外log加分
+        # 26176期P1实际=5(预测top3=[6,0,2]), P2实际=8(预测top3=[0,7,1])
+        # 两位置均完全脱离实际, 此修正鼓励低频数字出现在前2位
+        p12_bonus = 0.0
+        for pos in [0, 1]:
+            pf = self.pos_freq[pos].get(digits[pos], 0)
+            # 频率<10%的数字给予log加分(每个+0.25)
+            if pf < 0.10:
+                p12_bonus += 0.25
+        # [V1.23.0-E] 近期出现数字先验加权: 最近5期出现过的数字给少量log加分
+        # 实际开奖模式具有短期连续性, 如26176(581)继承26175(838)中8的重现
+        _recent_window = min(5, len(self.draws))
+        _recent_set = set()
+        for _d in self.draws[-_recent_window:]:
+            _recent_set.update(_d[:5])
+        _recent_count = sum(1 for digit in digits if digit in _recent_set)
+        # 0~2/3/4/5个近期数字 → +0/+0.08/+0.15/+0.22 (log空间)
+        _recent_bonus = max(0.0, (_recent_count - 2) * 0.08) if _recent_count > 2 else 0.0
+        
+        l1 = self._to_log_prob(l1)
+        l1 += cold_bonus  # log空间加法
+        l1 += p12_bonus   # [V1.23.0-B] P1/P2 log空间加分
+        l1 += _recent_bonus  # [V1.23.0-E] 近期数字加分
+        # 【O1】万位/千位短间隔重复加分: 上期同位置数字重复且近50期≥2次时
+        # 26178期万位8(上期万=8)完全遗漏, 短间隔重复有统计持续性
+        # 该加分直接提升log空间分数, 与recent_bonus互补(后者不区分位置)
+        if len(self.draws) >= 2:
+            _last = self.draws[-1]
+            for _p in [0, 1]:  # 万位/千位
+                if digits[_p] == _last[_p]:
+                    _pos_seq = [d[_p] for d in self.draws[-50:]]
+                    if sum(1 for x in _pos_seq if x == digits[_p]) >= 2:
+                        l1 += 0.15  # 万/千同位置重复+0.15log分
 
         # ----------------------------------------------------------------
         # L2: 和值 + 跨度 — 滑动窗口(50期) + 3σ非对称展宽
@@ -470,6 +539,22 @@ class Pick5FusionComplete:
         sum_ok = np.exp(-0.5 * ((s - _debias) / max(3 * _std_slide, 1)) ** 2)
         span_ok = 1.0 if 4 <= sp <= 8 else 0.6
         l2 = sum_ok * 0.6 + span_ok * 0.4
+        # 【V1.24.0-B】热号惯性跟踪: 某位置某数字近10期出现≥4次时加分
+        # 26177期十位7近20期出现6次(超级热号), 但预测十位无一注猜7
+        # 模型过度依赖频率衰减, 忽视了持续热号的惯性延续
+        _hot_inertia_bonus = 0.0
+        _HOT_WINDOW = min(10, len(self.draws))
+        if _HOT_WINDOW >= 10:
+            for pos in range(5):
+                _pos_digits = [d[pos] for d in self.draws[-_HOT_WINDOW:]]
+                _cnt = sum(1 for x in _pos_digits if x == digits[pos])
+                if _cnt >= 4:
+                    # 出现4次+0.10, 5次+0.15, 6次+0.20... (log空间)
+                    _hot_inertia_bonus += 0.05 * (_cnt - 2)
+        # 上限封顶
+        _hot_inertia_bonus = min(_hot_inertia_bonus, 0.50)
+        l2 = self._to_log_prob(l2)
+        l2 += _hot_inertia_bonus
 
         # ----------------------------------------------------------------
         # L3: 奇偶比 + 012路分布
@@ -479,17 +564,95 @@ class Pick5FusionComplete:
         road0 = sum(1 for d in digits if d % 3 == 0)
         l3_road = 1.0 - min(abs(road0 - 2) / 3, 1.0) * 0.4
         l3 = l3_parity * 0.6 + l3_road * 0.4
+        l3 = self._to_log_prob(l3)
 
         # ----------------------------------------------------------------
         # L4: 重复模式(豹子/对子/顺子) — 唯一数字越多分越高
         # ----------------------------------------------------------------
         uniq = len(set(digits))
         l4 = 1.0 if uniq >= 4 else 0.8 if uniq >= 3 else 0.5
+        # [V1.23.0-D] 数字支配惩罚: 同一数字出现≥3次时额外减分
+        # 如[0,0,4,0,2]中0出现3次, 这种集中在Top10中会导致某数字过度代表
+        _digit_cnt = Counter(digits)
+        _max_repeat = max(_digit_cnt.values())
+        if _max_repeat >= 3:
+            # 重复3次-0.15, 4次-0.30, 5次-0.50 (log空间)
+            _dominance_penalty = -0.15 * (_max_repeat - 2)
+            l4 = max(l4 + _dominance_penalty, 0.1)
+        l4 = self._to_log_prob(l4)
 
         # ----------------------------------------------------------------
-        # L5: 已移除 — 上期P3与本期P5无因果关系, 恒定基线
+        # L5: 【V1.24.0-C】排列3→排列5跨期特征
+        # 利用已出的排列3三期号码(近3期前3位)作为排列5额外特征
+        # 排列5后3位=排列3(本期开奖), 跨期关联性:
+        #   - 前3位(万千百)影响后2位(十个)的分布
+        #   - 近3期P3的和值/跨度模式预测本期P5的前3位
         # ----------------------------------------------------------------
-        l5 = 0.5
+        _p3_score = 0.5
+        if len(self.draws) >= 5:
+            try:
+                # 近3期的前3位(P3等价), 计算和值与跨度
+                _p3_periods = [list(d[:3]) for d in self.draws[-3:]]
+                _p3_sums = [sum(d) for d in _p3_periods]
+                _p3_spans = [max(d)-min(d) for d in _p3_periods]
+                
+                # 候选的前3位
+                _front3 = list(digits[:3])
+                _front_sum = sum(_front3)
+                _front_span = max(_front3) - min(_front3)
+                
+                # 特征1: 前3位和值是否在近3期P3和值±4范围内
+                _sum_lo = min(_p3_sums) - 4
+                _sum_hi = max(_p3_sums) + 4
+                _sum_match = 1.0 if _sum_lo <= _front_sum <= _sum_hi else 0.3
+                
+                # 特征2: 前3位跨度是否在近3期P3跨度±2范围内
+                _span_lo = min(_p3_spans) - 2
+                _span_hi = max(_p3_spans) + 2
+                _span_match = 1.0 if _span_lo <= _front_span <= _span_hi else 0.4
+                
+                # 特征3: 候选前3位是否包含近3期P3的高频数字(出现≥2次)
+                _p3_digit_freq = Counter()
+                for d in _p3_periods:
+                    _p3_digit_freq.update(d)
+                _hot_p3 = {d for d, c in _p3_digit_freq.items() if c >= 2}
+                _hot_in_front = sum(1 for d in _front3 if d in _hot_p3)
+                _hot_match = min(_hot_in_front / 2.0, 1.0)
+                
+                # 特征4: 条件概率 — P(后2位 | 前3位)
+                _tail = tuple(digits[3:])
+                _cond_score = 0.5
+                _p3_corr = getattr(self, 'p3_corr', {})
+                if _p3_corr and 'tail_given_p3' in _p3_corr:
+                    _tg = _p3_corr['tail_given_p3']
+                    # 统计历史上前3位相同时后2位的分布
+                    _matching_tails = [t for p3, t in _tg if tuple(p3) == tuple(_front3)]
+                    if _matching_tails:
+                        _match_cnt = sum(1 for t in _matching_tails if t == _tail)
+                        _cond_score = 0.3 + 0.7 * (_match_cnt / max(len(_matching_tails), 1))
+                
+                # 【O4】前3位(P3)近期位置级偏置: 近10期各位置的转移概率
+                # 26178期前3位=8,3,7, 模型在万千百三位完全偏位
+                # 增加近10期各位置独立转移矩阵, 捕捉位置级短期趋势
+                _o4_p3_pos_bias = 0.5
+                if len(self.draws) >= 10:
+                    _recent_p3 = [list(d[:3]) for d in self.draws[-10:]]
+                    # 对每个位置, 检查候选数字在近10期该位置的频率
+                    _pos_hits = 0
+                    for _pi in range(3):
+                        _pos_seq = [d[_pi] for d in _recent_p3]
+                        _cnt = sum(1 for x in _pos_seq if x == _front3[_pi])
+                        if _cnt >= 2:
+                            _pos_hits += min(_cnt / 5.0, 1.0)
+                    # 位置命中率转化为偏置分: 0命中=0.3, 1命中=0.6, 2命中=0.8, 3命中=1.0
+                    _o4_p3_pos_bias = 0.3 + _pos_hits * 0.25
+                
+                _p3_score = (_sum_match * 0.20 + _span_match * 0.20 + 
+                             _hot_match * 0.20 + _cond_score * 0.20 +
+                             _o4_p3_pos_bias * 0.20)
+            except Exception:
+                pass
+        l5 = self._to_log_prob(max(_p3_score, 0.1))
 
         # ----------------------------------------------------------------
         # L6: 条件概率 — P(后2位 | 前3位和值段)
@@ -530,22 +693,41 @@ class Pick5FusionComplete:
         else:
             tail_repeat = 0
         tail_repeat_ok = 0.5 + tail_repeat * 0.2
-        l6 = tail_sum_ok * 0.35 + tail_span_ok * 0.30 + tail_repeat_ok * 0.35
+        # V1.20.0-C: 后2位与前3位重叠检测
+        tail_in_front = sum(1 for t in digits[3:] if t in digits[:3])
+        tail_overlap_bonus = 0.5 + tail_in_front * 0.25  # 0.5/0.75/1.0
+        # 【O2】后两位双胞胎模式检测: 十位=个位时检查近20期出现频率
+        # 26178期实际十=个=9, Top10中无任何一注后两位相同
+        # 双胞胎在P5中频率约12-15%, 不应被完全排除
+        _twin_score = 0.5
+        if tail[0] == tail[1]:
+            if len(self.draws) >= 20:
+                _twin_periods = [d[3:] for d in self.draws[-20:]]
+                _twin_cnt = sum(1 for t in _twin_periods if t[0] == t[1])
+                if _twin_cnt >= 2:
+                    _twin_score = 0.5 + min(_twin_cnt / 20.0 * 0.5, 0.5)
+        l6 = (tail_sum_ok * 0.25 + tail_span_ok * 0.20 +
+              tail_repeat_ok * 0.15 + tail_overlap_bonus * 0.20 +
+              _twin_score * 0.20)
+        l6 = self._to_log_prob(l6)
 
         # ----------------------------------------------------------------
         # L7: 已移除 — 与L4高度冗余(r=0.899), 保留L4
         # ----------------------------------------------------------------
         l7 = 0.5
+        l7 = self._to_log_prob(l7)
 
         # ----------------------------------------------------------------
         # L8: 已移除 — 99.9%候选得满分, 完全退化
         # ----------------------------------------------------------------
         l8 = 0.5
+        l8 = self._to_log_prob(l8)
 
         # ----------------------------------------------------------------
         # L9: 后2位独立条件概率 (贝叶斯) — 见 _build_back2_model
         # ----------------------------------------------------------------
         l9 = self._eval_back2_model(digits)
+        l9 = self._to_log_prob(l9)
 
         # ----------------------------------------------------------------
         # L10: 位置交互互信息
@@ -578,8 +760,34 @@ class Pick5FusionComplete:
                         match_count += 1
             if total_pairs > 0:
                 l10 = 0.3 + 0.7 * (match_count / max(total_pairs, 1))
+        l10 = self._to_log_prob(l10)
 
         return (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10)
+
+    # ── V1.20.0-A: 对数概率校准 ──────────────────────────────────────────
+
+    _LOG_PROB_EPS = 1e-6
+
+    def _to_log_prob(self, raw_score):
+        """将原始层分数转换为对数概率标度
+        核心思想: log(p) 空间下低分受大幅惩罚, 高分接近零,
+        组合多层时区分度 = (log0.9 - log0.1) ≈ 2.2, 是线性的10倍
+        """
+        p = max(float(raw_score), self._LOG_PROB_EPS)
+        p = min(p, 1.0)
+        return math.log(p)
+
+    def _log_prob_combine(self, scores_tuple, weights):
+        """对数概率融合: sum(w_i * log(p_i)) / sum(w_i)
+        返回归一化对数概率(-∞, 0], 值越接近0表示越好
+        """
+        total = 0.0
+        w_sum = 0.0
+        for i, s in enumerate(scores_tuple):
+            if weights[i] > 0:
+                total += weights[i] * self._to_log_prob(s)
+                w_sum += weights[i]
+        return total / max(w_sum, 1e-10)
 
     # ── 后2位独立贝叶斯模型 ──────────────────────────────────────────────
 
@@ -602,7 +810,7 @@ class Pick5FusionComplete:
         """
         卡方滑动窗口: 实时检测各位置数字频率偏离均匀分布
         生成soft权重修正因子, 用于GA评分乘数
-        窗口100期, alpha=0.15, 权重限幅[0.6, 1.4]
+        窗口100期, alpha=0.15, 权重限幅[0.5, 1.3]
         """
         n_periods = 100
         if len(self.draws) < n_periods:
@@ -618,7 +826,9 @@ class Pick5FusionComplete:
             for d in range(10):
                 obs = observed.get(d, 0)
                 std_residual = (obs - expected) / max(expected ** 0.5, 1)
-                w = max(0.7, min(1.2, 1.0 + alpha * std_residual))
+                # [V1.23.0-A] Chi2降权加深: 下限0.7→0.5, 上限1.2→1.3
+                # 增强对过度热号(如0/6/9)的惩罚力度, 同时给冷号更多提升空间
+                w = max(0.5, min(1.3, 1.0 + alpha * std_residual))
                 weights[d] = w
             self._chi2_weights[pos] = weights
         # 打印偏差最大的6个数字
@@ -649,6 +859,7 @@ class Pick5FusionComplete:
         """
         CUSUM在线断点检测: 检测各位置均值是否发生结构性偏移
         双侧CUSUM, k=0.5(参考值), h=5(阈值), 200期滑动
+        [V1.23.0-C] 均值计算窗口: 全量→近300期, 避免远距历史稀释近期信号
         """
         if len(self.draws) < 50:
             self._cusum_state = None
@@ -659,7 +870,8 @@ class Pick5FusionComplete:
         pos_names = ['W','Q','B','S','G']
         self._cusum_state = {}
         for pos in range(5):
-            vals = [d[pos] for d in self.draws]
+            # [V1.23.0-C] 改用近300期均值, 提升对近期偏移的敏感度
+            vals = [d[pos] for d in self.draws[-300:]]
             mu = np.mean(vals)
             sh, sl = 0.0, 0.0
             alarm_pos, alarm_neg = False, False
@@ -722,14 +934,29 @@ class Pick5FusionComplete:
                 pass
 
         # ── CUSUM结构偏移修正 ──
+        # V1.21.0 ④: 双向报警时取最近30期均值方向,避免双向互相打平
         self._debias['cusum_shift'] = 0.0
         if hasattr(self, '_cusum_state') and self._cusum_state:
             for pos in range(5):
                 state = self._cusum_state.get(pos, {})
-                if state.get('alarm_pos', False):
-                    self._debias['cusum_shift'] += 0.3
-                if state.get('alarm_neg', False):
-                    self._debias['cusum_shift'] -= 0.3
+                has_pos = state.get('alarm_pos', False)
+                has_neg = state.get('alarm_neg', False)
+                if has_pos and has_neg:
+                    # 双向报警: 检查最近30期均值偏移方向
+                    recent_vals = [d[pos] for d in self.draws[-30:]]
+                    recent_mu = np.mean(recent_vals)
+                    base_mu = state.get('mu', 4.5)
+                    diff = recent_mu - base_mu
+                    if diff > 0.3:  # 最近明显偏上
+                        self._debias['cusum_shift'] += 0.3
+                    elif diff < -0.3:  # 最近明显偏下
+                        self._debias['cusum_shift'] -= 0.3
+                    # |diff|<=0.3: 均值回归稳定, 不修正
+                else:
+                    if has_pos:
+                        self._debias['cusum_shift'] += 0.3
+                    if has_neg:
+                        self._debias['cusum_shift'] -= 0.3
 
         if self._debias:
             parts = []
@@ -771,10 +998,10 @@ class Pick5FusionComplete:
         # GA种群初始化 — 种子注入
         pop = []
         seeds = []
-        # 1) 80% 均匀随机种子
-        for _ in range(40):
+        # 1) 40% 均匀随机种子
+        for _ in range(20):
             seeds.append([rnd.randint(0, 9) for _ in range(5)])
-        # 2) 20% 卡方加权种子(降低比例减少错误偏好放大)
+        # 2) 20% 卡方加权种子
         if hasattr(self, '_chi2_weights') and self._chi2_weights is not None:
             for _ in range(10):
                 d = []
@@ -786,6 +1013,21 @@ class Pick5FusionComplete:
         else:
             for _ in range(10):
                 seeds.append([rnd.randint(0, 9) for _ in range(5)])
+        # 3) 【方案A-扩展】反主导种子: 强制注入万≠9 + 千≠4的组合
+        # 从过去的实际开奖中取样, 避免GA锁死在[9,4,...]的局部最优
+        from collections import Counter as _Cnt
+        if len(self.draws) >= 50:
+            # 统计前3位实际出现次数, 挑出热门的万/千/百搭配
+            front_triples = _Cnt(tuple(d[:3]) for d in self.draws[-200:])
+            # 排除[9,4,4]和[9,4,*], 取Top 20个非锁定三元组
+            anti_dominated = [
+                list(k) for k, _ in front_triples.most_common(60)
+                if k[0] != 9 or k[1] != 4  # 万不能=9或千不能=4
+            ][:15]
+            for ad in anti_dominated:
+                # 后2位随机
+                full = ad + [rnd.randint(0, 9), rnd.randint(0, 9)]
+                seeds.append(full)
 
         pop = [tuple(s) for s in seeds]
         # 补充到pop_size
@@ -802,14 +1044,21 @@ class Pick5FusionComplete:
         weights = self._get_optimized_weights()
 
         def fitness(digits_tuple):
-            scores = self._compute_layers(list(digits_tuple))
-            fs = sum(scores[i] * weights[i] for i in range(len(scores)))
-            # 卡方偏差修正: 对近期偏倚数字加权
-            fs *= self._compute_chi2_bonus(digits_tuple)
+            if digits_tuple is None:
+                return -999.0
+            if not isinstance(digits_tuple, tuple) or len(digits_tuple) != 5:
+                digits_list = [random.randint(0, 9) for _ in range(5)]
+            else:
+                digits_list = list(digits_tuple)
+            scores = self._compute_layers(digits_list)
+            # V1.20.0-A: 对数概率融合替代加权求和
+            fs = self._log_prob_combine(scores, weights)
+            # 卡方修正: 对数空间下加法
+            fs += math.log(self._compute_chi2_bonus(digits_list))
             return fs
 
         best = None
-        best_score = -1.0
+        best_score = -999.0  # V1.20.0: 对数空间下分数可达-6.9, 需更低初值
         seen_set = set()
 
         for gen in range(generations):
@@ -886,15 +1135,92 @@ class Pick5FusionComplete:
             d = tuple(rnd.randint(0, 9) for _ in range(5))
             all_candidates.add(d)
 
-        # ── Step 4: 评分 + 卡方修正 ──
+        # 【方案A-扩展2】V2.0.0: 全5位冷位数字强制注入
+        # 确保每位冷位数字(近10期未出现)都在候选池中有路径
+        # 解决GA收敛导致冷位数字完全消失的问题
+        if len(self.draws) >= 10:
+            _recent_10 = self.draws[-10:]
+            # 每位冷位数字
+            _cold_by_pos = []
+            for _p in range(5):
+                _recent = {d[_p] for d in _recent_10}
+                _cold_by_pos.append([d for d in range(10) if d not in _recent])
+            _existing_by_pos = [set(d[_p] for d in all_candidates) for _p in range(5)]
+            # 对每位, 如果冷位数字不在现有池中, 注入
+            for _p in range(5):
+                for _cold_d in _cold_by_pos[_p]:
+                    if _cold_d not in _existing_by_pos[_p]:
+                        # 构造一个包含该冷位数字的候选
+                        _new = list(rnd.choices(range(10), k=5))
+                        _new[_p] = _cold_d
+                        all_candidates.add(tuple(_new))
+        
+        # 【方案A-扩展2续】从缓存枚举注入前3位多样候选
+        # 确保万/千/百的多样性, 不受GA收敛影响
+        if getattr(self, '_cache_ready', False) and hasattr(self, '_all_digits'):
+            # 统计目前已收集的万/千位分布
+            front_freq = Counter((d[0], d[1]) for d in all_candidates)
+            # 需要补充的万/千组合: 出现<2次的
+            for wan in range(10):
+                for qian in range(10):
+                    key = (wan, qian)
+                    if front_freq.get(key, 0) < 2:
+                        # 从缓存枚举取该万/千组合的前5个百位最优组合
+                        bai_hits = Counter()
+                        for idx, digits in enumerate(self._all_digits):
+                            if digits[0] == wan and digits[1] == qian:
+                                bai_hits[digits[2]] += 1
+                        for bai_d in [d for d, _ in bai_hits.most_common(3)]:
+                            # 固定前3位, 后2位随机
+                            d = tuple([wan, qian, bai_d, rnd.randint(0, 9), rnd.randint(0, 9)])
+                            all_candidates.add(d)
+
+        # ── Step 4: 评分 + 对数概率融合 + 卡方修正 + 后区对子加分 ──
+        # 【方案B】后区对子检测: [十,个]位相同时额外加分
+        # 排列5后2位[6,6]等对子结构是常见的, L4去重数会惩罚它
+        # 需独立评分器补偿
+        prev_tail = (self.draws[-1][3], self.draws[-1][4]) if len(self.draws) >= 1 else (0, 0)
+        
+        # 统计近50期后2位对子出现的频率
+        if not hasattr(self, '_tail_pair_rate'):
+            _tail_pair_count = 0
+            _tail_window = min(50, len(self.draws))
+            for d in self.draws[-_tail_window:]:
+                if d[3] == d[4]:
+                    _tail_pair_count += 1
+            self._tail_pair_rate = _tail_pair_count / max(_tail_window, 1)
+        
         scored = []
         for digits_tuple in all_candidates:
             scores = self._compute_layers(list(digits_tuple))
-            fs = sum(scores[i] * weights[i] for i in range(10))
+            # V1.20.0-A: 对数概率融合
+            fs = self._log_prob_combine(scores, weights)
             chi2_bonus = self._compute_chi2_bonus(digits_tuple)
+            # 卡方修正在对数空间下加法
+            fs += math.log(chi2_bonus)
+            
+            # 【V2.0.0】冷位数字log空间加分: 每位冷位直接加0.8 log分
+            # (在[-1.1,-0.4]分数范围内, 0.8是强力boost)
+            _cold_bonus = 0.0
+            for _p in range(5):
+                if self.pos_freq[_p].get(digits_tuple[_p], 0) < 0.08:
+                    _cold_bonus += 0.8
+            if _cold_bonus > 0:
+                fs += _cold_bonus
+            
+            # 【方案B】后区对子加分: [十,个]相同时, 根据历史频率给bonus
+            if digits_tuple[3] == digits_tuple[4]:
+                # 对子加分: 历史出现率越高, 加分越多
+                # rate≈0.14时 bonus≈1.04, log≈0.04(温和)
+                pair_bonus = 1.0 + self._tail_pair_rate * 0.3
+                fs += math.log(pair_bonus)
+                # 如果后区对子数字与上期后2位相关, 额外加分
+                if digits_tuple[3] in prev_tail:
+                    fs += math.log(1.1)  # +10%
+            
             scored.append({
                 'digits': list(digits_tuple),
-                'final_score': fs * chi2_bonus,
+                'final_score': fs,
             })
 
         scored.sort(key=lambda x: -x['final_score'])
@@ -976,11 +1302,103 @@ class Pick5FusionComplete:
                     break
             return selected
 
-        # 先对全量候选施加后2位多样性约束(取前200+), 再用分层选
-        top200_with_div = _apply_position_diversity(scored, 200, [3, 4])
+        # 【方案A】万/千/百位多样性硬约束: 前3位每数字每位置≤2次
+        def _apply_all_position_diversity(scored_list, n):
+            """全5位置多样性: 前3位(万/千/百)每数字≤2, 后2位(十/个)每数字≤3
+               V2.0.0: 采样池扩展(每位至少5不同数字) + 冷位门禁(2路径) + 反垄断(≤30%)
+            """
+            if len(scored_list) <= n:
+                return list(scored_list)
+            
+            # 【方案2】计算每个位置的冷位数字(近10期未出现)
+            cold_pos_digits = [{}, {}, {}, {}, {}]
+            if len(self.draws) >= 10:
+                recent_10 = self.draws[-10:]
+                for pos in range(5):
+                    recent_pos = {d[pos] for d in recent_10}
+                    for d in range(10):
+                        if d not in recent_pos:
+                            cold_pos_digits[pos][d] = True
+            
+            # 冷位优先候选
+            cold_candidates = []
+            normal_candidates = []
+            for cand in scored_list:
+                dig = cand['digits']
+                has_cold = any(p < len(cold_pos_digits) and dig[p] in cold_pos_digits[p] for p in range(5))
+                if has_cold:
+                    cold_candidates.append(cand)
+                else:
+                    normal_candidates.append(cand)
+            
+            # 尝试3级严格度
+            for max_repeat in [2, 3, 999]:
+                result = []
+                seen_tuples = set()
+                pos_cnts = [Counter() for _ in range(5)]
+                cold_path_count = {pos: Counter() for pos in range(5)}
+                
+                # 冷位候选优先, 再普通
+                ordered = cold_candidates + normal_candidates
+                for cand in ordered:
+                    t = tuple(cand['digits'])
+                    if t in seen_tuples:
+                        continue
+                    ok = True
+                    for pos in range(5):
+                        limit = max_repeat if pos < 3 else 3
+                        if pos_cnts[pos][cand['digits'][pos]] >= limit:
+                            ok = False
+                            break
+                    if not ok:
+                        continue
+                    
+                    # 【方案2】冷位路径控制: 某冷位数字已在2条路径中, 且结果过半 → 跳过
+                    skip = False
+                    for pos in range(5):
+                        dig = cand['digits'][pos]
+                        if dig in cold_pos_digits[pos]:
+                            if cold_path_count[pos][dig] >= 2 and len(result) >= max(3, n // 2):
+                                skip = True
+                                break
+                    if skip:
+                        continue
+                    
+                    result.append(cand)
+                    seen_tuples.add(t)
+                    for pos in range(5):
+                        pos_cnts[pos][cand['digits'][pos]] += 1
+                        if cand['digits'][pos] in cold_pos_digits[pos]:
+                            cold_path_count[pos][cand['digits'][pos]] += 1
+                    if len(result) >= n:
+                        break
+                
+                if len(result) >= n:
+                    # 【方案1+3】检查每位是否覆盖≥5个不同数字, 且无单个数字>30%
+                    ok = True
+                    for pos in range(5):
+                        pos_vals = Counter(c['digits'][pos] for c in result)
+                        if len(pos_vals) < 5:
+                            ok = False
+                            break
+                        for d, cnt in pos_vals.items():
+                            if cnt / len(result) > 0.30:
+                                ok = False
+                                break
+                        if not ok:
+                            break
+                    if ok:
+                        return result[:n]
+                    # 不满足则尝试下一级严格度
+                if max_repeat == 999:
+                    return result[:n]
+            return scored_list[:n]
+
+        # 先对全量候选施加全位多样性约束(取前200+), 再用分层选
+        top200_with_div = _apply_all_position_diversity(scored, 200)
         top100 = _layered_selection(top200_with_div, k=min(100, len(top200_with_div)))
-        # 再对top100施加后2位多样性(严格级别最大3, 不降级到999)
-        top100 = _apply_position_diversity(top100, 100, [3, 4])
+        # 再对top100施加全位多样性
+        top100 = _apply_all_position_diversity(top100, 100)
         # 分层选top10
         top10 = _layered_selection(top100, k=10)
         # 后2位硬约束: 最大重复=3, 不够10注也认
@@ -1105,6 +1523,25 @@ class Pick5FusionComplete:
             return round(p * 100, 1)
         return round(score * 10, 1)
 
+    # ═══ 【方案D】评分区间校准 ═══
+    # V1.20.0引入对数概率融合后, final_score变为负值(-ln形式,约-2~-15)
+    # 映射到[0,100]显示区间, 保持排名不变
+    def _display_score(self, log_score: float, reference_max: Optional[float] = None) -> float:
+        """
+        将对数概率score映射到[0,100]显示区间
+        原理: exp(score - max) -> [0,1] -> ×100
+        参数:
+          log_score: 待转换的对数概率分(负值)
+          reference_max: 参考最大值(如Top1的score), 不传则直接exp
+        """
+        if reference_max is not None:
+            rel = log_score - reference_max  # 相对差值(≤0)
+            # rel=-1 → 36.8分, rel=-2 → 13.5分, rel=-3 → 5.0分
+            return round(math.exp(max(rel, -5.0)) * 100, 1)
+        # 没有参考点: exp(log_score)已足够小, ×1000放大
+        raw = math.exp(max(log_score, -10.0))
+        return round(min(raw * 1000, 100.0), 1)
+
     def predict(self, top_n: int = 10) -> Dict[str, Any]:
         """主预测 V1.18.0: +万/千位覆盖展宽 + 复式后2位保底"""
         prev = list(self.draws[-1]) if self.draws else [0]*5
@@ -1116,6 +1553,30 @@ class Pick5FusionComplete:
         result = self.enumerate_all(prev)
 
         top10 = result['top10'][:top_n]
+
+        # 【方案4】万位/千位空位标记: 排列三百位→万位/千位迁移检测
+        # 近5期排列三百位中出现但万位Top10未出现的数字补入候选
+        try:
+            if len(self.draws) >= 5:
+                _recent_p3_bai = [d[2] for d in self.draws[-5:]]
+                _current_wan = set(b['digits'][0] for b in top10)
+                _migrate_wans = set(_recent_p3_bai) - _current_wan
+                if _migrate_wans:
+                    print(f"[P5-Migrate] 万位空位:{_migrate_wans}(排列三百位→万位)")
+                    # 从all中找包含迁移万位的候选替换10注中的冷门
+                    _all = result.get('all', [])
+                    _replacement = []
+                    for _cand in _all:
+                        if len(_replacement) >= 2:
+                            break
+                        if _cand['digits'][0] in _migrate_wans:
+                            _t = tuple(_cand['digits'])
+                            if _t not in set(tuple(b['digits']) for b in top10):
+                                _replacement.append(_cand)
+                    for _i in range(min(len(_replacement), len(top10))):
+                        top10[-_i-1] = _replacement[_i]
+        except Exception:
+            pass
 
         # ═══ 万/千位覆盖展宽 + 后2位平衡(V1.18.0) ═══
         # 确保万/千位分布均匀 + 十/个保留多样性
@@ -1167,26 +1628,245 @@ class Pick5FusionComplete:
                         used_tuples.add(t)
                         break
 
-        # 校准命中概率
-        for c in top10:
-            c['hit_probability'] = self._apply_calibration(c['final_score'])
+        # ═══ 【O3】位置交叉硬约束增强 ═══
+        # 26178期[9,4,3,7,7]组选{3,7,9}命中3/4但位置全错
+        # 对Top10中组选多样性好的候选(4+独特数字),
+        # 从all_scored中找同一数字集的不同位置排列(已由枚举完成),
+        # 取其中评分最高的版本替换当前
+        try:
+            _o3_replaced = 0
+            _all_for_o3 = result.get('all', [])
+            # 建一个按数字集分组的最高分映射
+            _o3_best_by_set = {}
+            for _c in _all_for_o3[:500]:
+                _s = tuple(sorted(_c['digits']))
+                if _s not in _o3_best_by_set or _c['final_score'] > _o3_best_by_set[_s]['final_score']:
+                    _o3_best_by_set[_s] = _c
+            for _i, _c in enumerate(top10):
+                _digits_set = len(set(_c['digits']))
+                if _digits_set < 4:
+                    continue  # 低于4个独特数字, 排列价值低
+                _s = tuple(sorted(_c['digits']))
+                if _s in _o3_best_by_set:
+                    _better = _o3_best_by_set[_s]
+                    if _better['final_score'] > _c['final_score']:
+                        top10[_i] = dict(_better)
+                        _o3_replaced += 1
+            if _o3_replaced > 0:
+                print(f"[P5-O3] 位置交叉优化: 替换{_o3_replaced}注(取同数字集最优排列)")
+        except Exception as e:
+            print(f"[P5-O3] ⚠️ 跳过: {e}")
 
-        # 保存预测结果 (用于偏差修正)
-        top_list = result.get('top10', [])
-        self._last_prediction = top_list[0] if top_list else None
+        # V1.20.0-A: 对数概率下Softmax校准
+        # 对Top10的log分数做softmax得相对概率, 再映射到[0,100]
+        scores_arr = [c['final_score'] for c in top10]
+        if scores_arr:
+            s_max = max(scores_arr)
+            # softmax: 以最佳为参考点, 防溢出
+            exp_vals = [math.exp(s - s_max) for s in scores_arr]
+            total_exp = sum(exp_vals)
+            for c, ev in zip(top10, exp_vals):
+                prob = ev / total_exp * 100.0  # 相对概率百分比
+                c['raw_probability'] = round(ev / total_exp, 4)
+                c['hit_probability'] = round(prob, 1)
+                # 【方案D】归一化显示分数[0,100]
+                c['display_score'] = self._display_score(c['final_score'], s_max)
+
+        # ═══ 【方案C】跨期预测漂移检测 ═══
+        # 将当前Top10与存储的上期Top10对比Jaccard相似度
+        # 若>0.5, 从all_scored注入3组完全不同的号码
+        try:
+            from prediction_store import load_prediction
+            prev_stored = load_prediction(str(int(self.last_period)))
+            if prev_stored and len(top10) >= 8:
+                current_set = {tuple(b['digits']) for b in top10}
+                prev_set = {tuple(b['digits']) for b in prev_stored.get('bets', [])[:10]}
+                if current_set and prev_set:
+                    intersect = len(current_set & prev_set)
+                    union = len(current_set | prev_set)
+                    jaccard = intersect / max(union, 1)
+                    if jaccard > 0.5:
+                        print(f"[P5-Drift] ⚠️ 跨期相似度{jaccard:.2f}(高), 注入3组新号码")
+                        # 从all_scored找3组与当前Top10完全不同的号码
+                        current_digit_sets = [set(b['digits']) for b in top10]
+                        new_groups = []
+                        for cand in all_scored[:200]:
+                            if len(new_groups) >= 3:
+                                break
+                            t = tuple(cand['digits'])
+                            if t in current_set:
+                                continue
+                            cand_set = set(cand['digits'])
+                            # 与当前Top10至少2个数字不同
+                            max_overlap = max(
+                                len(cand_set & cs) for cs in current_digit_sets[:5]
+                            )
+                            if max_overlap <= 3:
+                                new_groups.append(cand)
+                        # 替换最后3注
+                        for i, ng in enumerate(new_groups):
+                            if i >= 3 or len(top10) <= i + 1:
+                                break
+                            top10[-(i+1)] = ng
+                        print(f"[P5-Drift] ✅ 注入{len(new_groups)}组")
+            else:
+                print(f"[P5-Drift] − 上期预测不存在(skip)")
+        except Exception as e:
+            pass
+
+        # ═══ 【方案A-最终硬约束】全位多样性兜底 V2.0.0 ═══
+        # 确保万/千/百每数字最多2次, 十/个最多3次
+        # 每位至少5个不同数字(方案1), 每数字≤30%(方案3)
+        # 如不满足, 从all_scored替补
+        def _final_diversity_enforce(candidates, all_pool, n=10):
+            if len(candidates) < n:
+                return candidates
+            
+            # 【方案2】冷位数字(近10期未出现)
+            cold_pos_digits = [{}, {}, {}, {}, {}]
+            if len(self.draws) >= 10:
+                recent_10 = self.draws[-10:]
+                for p in range(5):
+                    recent = {d[p] for d in recent_10}
+                    for d in range(10):
+                        if d not in recent:
+                            cold_pos_digits[p][d] = True
+            
+            result = []
+            seen = set()
+            pos_cnt = [Counter() for _ in range(5)]
+            cold_path_cnt = [Counter() for _ in range(5)]
+            front_limit, back_limit = 2, 3
+            
+            for cand in candidates + all_pool:
+                t = tuple(cand['digits'])
+                if t in seen:
+                    continue
+                ok = True
+                for p in range(5):
+                    lim = front_limit if p < 3 else back_limit
+                    if pos_cnt[p][cand['digits'][p]] >= lim:
+                        ok = False
+                        break
+                if not ok:
+                    continue
+                # 冷位路径控制: 某冷位已在2条路径中且结果过半, 跳过
+                skip = False
+                for p in range(5):
+                    dp = cand['digits'][p]
+                    if dp in cold_pos_digits[p] and cold_path_cnt[p][dp] >= 2 and len(result) >= max(3, n // 2):
+                        skip = True
+                        break
+                if skip:
+                    continue
+                result.append(cand)
+                seen.add(t)
+                for p in range(5):
+                    pos_cnt[p][cand['digits'][p]] += 1
+                    if cand['digits'][p] in cold_pos_digits[p]:
+                        cold_path_cnt[p][cand['digits'][p]] += 1
+                if len(result) >= n:
+                    break
+            
+            # 补足不足n注
+            if len(result) < n:
+                for cand in candidates:
+                    if len(result) >= n:
+                        break
+                    t = tuple(cand['digits'])
+                    if t in seen:
+                        continue
+                    result.append(cand)
+                    seen.add(t)
+            
+            # 【方案1+3】V2.0.0: 每位5数字+≤30% + 全量修复
+            # 修复池不足时直接生成新候选(不依赖all_pool)
+            result = result[:n]
+            for _round in range(10):
+                need_fix = False
+                for p in range(5):
+                    vals = Counter(c['digits'][p] for c in result)
+                    if len(vals) < 5:
+                        need_fix = True
+                        for want_d in range(10):
+                            if want_d not in vals:
+                                # 生成一个含want_d的新候选(替换result中最后一个)
+                                _old = result[-1]
+                                _new_d = list(_old['digits'])
+                                _new_d[p] = want_d
+                                _t = tuple(_new_d)
+                                if _t not in seen:
+                                    seen.discard(tuple(_old['digits']))
+                                    result[-1] = {'digits': _new_d, 'final_score': _old.get('final_score', 0)-0.1}
+                                    seen.add(_t)
+                                break
+                if not need_fix:
+                    break
+                # 再查反垄断
+                for p in range(5):
+                    vals = Counter(c['digits'][p] for c in result)
+                    for d, cnt in vals.items():
+                        if cnt / n > 0.30:
+                            need_fix = True
+                            # 找一个不含d的位置, 替换该位置最后一个含d的
+                            for idx in range(n-1, -1, -1):
+                                if result[idx]['digits'][p] == d:
+                                    _new_d = list(result[idx]['digits'])
+                                    # 替换为该位置的平均冷位
+                                    _alternative = [x for x in range(10) if x != d and (x not in vals or vals[x] < cnt-1)]
+                                    if _alternative:
+                                        _new_d[p] = _alternative[0]
+                                        _t = tuple(_new_d)
+                                        if _t not in seen:
+                                            seen.discard(tuple(result[idx]['digits']))
+                                            result[idx] = {'digits': _new_d, 'final_score': result[idx].get('final_score', 0)-0.1}
+                                            seen.add(_t)
+                                    break
+                            break
+                if not need_fix:
+                    break
+            return result[:n]
+
+        all_pool = all_scored if all_scored else top10
+        # 扩大修复池: 从result['all'](500)扩大到包含枚举全量
+        # 配合冷位bonus, 确保缺失数字能从全量候选池中找到
+        try:
+            _all_extended = result.get('all', []) + [
+                {'digits': d, 'final_score': 0} for d in fusion._all_digits[-2000:]
+            ]
+            top10 = _final_diversity_enforce(top10, _all_extended, 10)
+        except Exception:
+            top10 = _final_diversity_enforce(top10, all_pool, 10)
+
+        # 重新计算display_score + hit_probability(方案D)
+        if top10 and len(top10) >= 2:
+            scores_arr = [b.get('final_score', -999) for b in top10]
+            s_max = max(scores_arr)
+            exp_vals = [math.exp(s - s_max) for s in scores_arr]
+            total_exp = sum(exp_vals)
+            for b, ev in zip(top10, exp_vals):
+                b['display_score'] = self._display_score(b.get('final_score', -10), s_max)
+                b['raw_probability'] = round(ev / total_exp, 4)
+                b['hit_probability'] = round(ev / total_exp * 100.0, 1)
+
+        # 保存预测结果 (用最终 diversity 后的 top10)
+        self._last_prediction = top10[0] if top10 else None
 
         # ═══ 复式方案(V1.18.0): 前3位+后2位分拆复式, 后2位保底≥3候选 ═══
         compound = self._generate_compound(result)
 
+        # V1.20.0: 预测期号 = 最新数据期号 + 1 (修正 off-by-one)
+        next_period = str(int(self.last_period) + 1)
+
         # 自动存储预测结果
         try:
             from prediction_store import store_prediction
-            store_prediction(self.last_period, top10)
+            store_prediction(next_period, top10)
         except Exception:
             pass
 
         return {
-            'period': self.last_period,
+            'period': next_period,
             'bets': top10,
             'tail_probs': self._get_tail_probs(top10),
             'compound_bets': compound,
